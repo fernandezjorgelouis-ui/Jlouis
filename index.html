@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Torre Grúa</title>
+<style>
+  :root { --bg1:#1b2a41; --bg2:#324a5f; --ink:#f4f1de; --accent:#f2a541; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { height:100%; background:var(--bg1); overflow:hidden; font-family:system-ui,-apple-system,sans-serif; color:var(--ink); }
+  canvas { display:block; width:100vw; height:100vh; touch-action:none; cursor:pointer; }
+  #hud { position:fixed; top:16px; left:0; right:0; text-align:center; pointer-events:none; }
+  #score { font-size:56px; font-weight:800; text-shadow:0 3px 0 rgba(0,0,0,.3); }
+  #best { font-size:14px; opacity:.75; letter-spacing:.08em; text-transform:uppercase; }
+  #msg { position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; pointer-events:none; text-align:center; padding:16px; }
+  #msg h1 { font-size:44px; color:var(--accent); text-shadow:0 4px 0 rgba(0,0,0,.35); }
+  #msg p { font-size:18px; opacity:.9; }
+  #combo { position:fixed; top:110px; left:0; right:0; text-align:center; font-weight:800; font-size:22px; color:var(--accent); opacity:0; transition:opacity .2s; pointer-events:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud"><div id="score">0</div><div id="best">Récord: 0</div></div>
+<div id="combo">¡PERFECTO!</div>
+<div id="msg"><h1>TORRE GRÚA</h1><p>Toca o presiona ESPACIO para soltar la viga.<br>Lo que sobresale, se corta.</p></div>
+<script>
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const scoreEl = document.getElementById('score'), bestEl = document.getElementById('best');
+const msgEl = document.getElementById('msg'), comboEl = document.getElementById('combo');
+let W, H, DPR;
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize); resize();
+
+const BH = 34;                // block height
+const PERFECT = 6;            // px tolerance for a perfect drop
+let best = 0;
+try { best = +localStorage.getItem('torreGruaBest') || 0; } catch (e) {}
+bestEl.textContent = 'Récord: ' + best;
+
+let stack, moving, falling, debris, camY, state, speed, dir, combo, t0;
+
+function colorFor(i) { return `hsl(${(28 + i * 11) % 360}, 70%, 58%)`; }
+
+function reset() {
+  const w = Math.min(260, W * 0.55);
+  stack = [{ x: W / 2 - w / 2, w, y: 0, c: colorFor(0) }];
+  debris = []; falling = null; camY = 0; speed = 3; combo = 0;
+  scoreEl.textContent = '0';
+  spawn();
+}
+function spawn() {
+  const top = stack[stack.length - 1];
+  dir = Math.random() < .5 ? 1 : -1;
+  moving = { x: dir > 0 ? -top.w : W, w: top.w, y: stack.length, c: colorFor(stack.length) };
+}
+// world y (level) -> screen y
+function sy(level) { return H - 120 - level * BH + camY; }
+
+function drop() {
+  if (state === 'intro' || state === 'over') { msgEl.style.display = 'none'; state = 'play'; reset(); return; }
+  if (state !== 'play' || falling) return;
+  const top = stack[stack.length - 1], m = moving;
+  let left = Math.max(m.x, top.x), right = Math.min(m.x + m.w, top.x + top.w);
+  let overlap = right - left;
+  if (overlap <= 0) { falling = { ...m, vy: 0, rot: 0 }; moving = null; gameOver(); return; }
+  if (Math.abs(m.x - top.x) < PERFECT) {
+    left = top.x; overlap = top.w; combo++;
+    flash(combo > 1 ? `¡PERFECTO x${combo}!` : '¡PERFECTO!');
+    if (combo >= 3) { overlap = Math.min(overlap + 8, 320); left -= 4; } // reward streaks
+  } else {
+    combo = 0;
+    const cutX = m.x < top.x ? m.x : right, cutW = m.w - (right - left);
+    debris.push({ x: cutX, w: cutW, y: m.y, c: m.c, vy: 0, vx: m.x < top.x ? -1.5 : 1.5, rot: 0 });
+  }
+  stack.push({ x: left, w: overlap, y: m.y, c: m.c });
+  const n = stack.length - 1;
+  scoreEl.textContent = n;
+  speed = Math.min(3 + n * 0.18, 11);
+  spawn();
+}
+function flash(t) { comboEl.textContent = t; comboEl.style.opacity = 1; clearTimeout(flash.h); flash.h = setTimeout(() => comboEl.style.opacity = 0, 700); }
+function gameOver() {
+  state = 'over';
+  const s = stack.length - 1;
+  if (s > best) { best = s; try { localStorage.setItem('torreGruaBest', best); } catch (e) {} }
+  bestEl.textContent = 'Récord: ' + best;
+  setTimeout(() => {
+    msgEl.innerHTML = `<h1>${s} PISOS</h1><p>${s >= best && s > 0 ? '¡Nuevo récord! 🏗️' : 'La obra se cayó.'}<br>Toca para construir otra.</p>`;
+    msgEl.style.display = 'flex';
+  }, 500);
+}
+
+function update() {
+  if (moving) {
+    moving.x += speed * dir;
+    if (moving.x + moving.w > W + 20 && dir > 0) dir = -1;
+    if (moving.x < -20 && dir < 0) dir = 1;
+  }
+  const targetCam = Math.max(0, (stack.length - 6) * BH);
+  camY += (targetCam - camY) * 0.08;
+  for (const d of debris) { d.vy += 0.5; d.yPx = (d.yPx ?? sy(d.y)) + d.vy; d.x += d.vx; d.rot += d.vx * 0.02; }
+  debris = debris.filter(d => d.yPx < H + 200);
+  if (falling) { falling.vy += 0.5; falling.yPx = (falling.yPx ?? sy(falling.y)) + falling.vy; }
+}
+
+function drawBlock(x, y, w, c) {
+  ctx.fillStyle = c; ctx.fillRect(x, y, w, BH - 2);
+  ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.fillRect(x, y, w, 5);
+  ctx.fillStyle = 'rgba(0,0,0,.18)'; ctx.fillRect(x, y + BH - 8, w, 6);
+  ctx.strokeStyle = 'rgba(0,0,0,.25)'; ctx.lineWidth = 1;
+  for (let i = x + 18; i < x + w - 6; i += 22) { ctx.beginPath(); ctx.arc(i, y + BH / 2 - 1, 2.2, 0, 7); ctx.stroke(); } // rivets
+}
+
+function draw() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  const hShift = Math.min(camY / 3000, 1);
+  g.addColorStop(0, `hsl(${215 + hShift * 40}, 45%, ${16 - hShift * 8}%)`);
+  g.addColorStop(1, `hsl(${205 + hShift * 30}, 35%, ${30 - hShift * 12}%)`);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  // ground
+  const gy = sy(0) + BH;
+  if (gy < H) { ctx.fillStyle = '#2b2d42'; ctx.fillRect(0, gy, W, H - gy); ctx.fillStyle = '#f2a541'; for (let i = 0; i < W; i += 40) ctx.fillRect(i, gy, 20, 6); }
+
+  for (const b of stack) drawBlock(b.x, sy(b.y), b.w, b.c);
+
+  for (const d of debris) {
+    ctx.save(); ctx.translate(d.x + d.w / 2, d.yPx + BH / 2); ctx.rotate(d.rot);
+    drawBlock(-d.w / 2, -BH / 2, d.w, d.c); ctx.restore();
+  }
+  if (falling) drawBlock(falling.x, falling.yPx, falling.w, falling.c);
+
+  if (moving) {
+    const y = sy(moving.y), cx = moving.x + moving.w / 2;
+    // crane cable + hook
+    ctx.strokeStyle = '#ddd'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, y - 10); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - 14, y); ctx.lineTo(cx, y - 12); ctx.lineTo(cx + 14, y); ctx.stroke();
+    ctx.fillStyle = '#f2a541'; ctx.fillRect(cx - 6, y - 18, 12, 8);
+    drawBlock(moving.x, y, moving.w, moving.c);
+  }
+  // crane jib at top
+  ctx.fillStyle = '#f2a541'; ctx.fillRect(0, 0, W, 8);
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; for (let i = 0; i < W; i += 24) ctx.fillRect(i, 0, 3, 8);
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+
+state = 'intro'; reset(); moving = null;
+cv.addEventListener('pointerdown', drop);
+window.addEventListener('keydown', e => { if (e.code === 'Space' || e.code === 'Enter') { e.preventDefault(); drop(); } });
+loop();
+</script>
+</body>
+</html>
