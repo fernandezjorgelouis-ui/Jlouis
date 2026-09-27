@@ -87,10 +87,11 @@ function flash(t) { comboEl.textContent = t; comboEl.style.opacity = 1; clearTim
 function gameOver() {
   state = 'over';
   const s = stack.length - 1;
-  if (s > best) { best = s; try { localStorage.setItem('torreGruaBest', best); } catch (e) {} }
+  const newBest = s > best;
+  if (newBest) { best = s; try { localStorage.setItem('torreGruaBest', best); } catch (e) {} }
   bestEl.textContent = 'Récord: ' + best;
   setTimeout(() => {
-    msgEl.innerHTML = `<h1>${s} PISOS</h1><p>${s >= best && s > 0 ? '¡Nuevo récord! 🏗️' : 'La obra se cayó.'}<br>Toca para construir otra.</p>`;
+    msgEl.innerHTML = `<h1>${s} PISOS</h1><p>${newBest ? '¡Nuevo récord! 🏗️' : 'La obra se cayó.'}<br>Toca para construir otra.</p>`;
     msgEl.style.display = 'flex';
   }, 500);
 }
